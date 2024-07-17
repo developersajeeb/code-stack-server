@@ -78,11 +78,11 @@ async function run() {
       try {
         const email = req.params.email;
         const user = await usersCollection.findOne({ email, entryPoint: "google" });
-    
+
         if (!user) {
           return res.status(404).send({ message: "User not found with this Google account" });
         }
-    
+
         res.send(user);
       } catch (error) {
         console.error(error);
@@ -137,6 +137,22 @@ async function run() {
       res.send(result);
     });
 
+    //Get User With Username Query
+    app.get('/user', async (req, res) => {
+      const username = req.query.username;
+      const query = { username: username };
+      try {
+        const result = await usersCollection.findOne(query);
+        if (result) {
+          res.send(result);
+        } else {
+          res.status(404).send({ message: "User not found" });
+        }
+      } catch (error) {
+        res.status(500).send({ message: "Error fetching user", error: error.message });
+      }
+    });
+
     // Update user info
     app.put('/user/:email', async (req, res) => {
       const email = req.params.email;
@@ -181,21 +197,21 @@ async function run() {
         console.error(error);
         res.status(500).json({ error: "Server error" });
       }
-    });    
+    });
 
     // Check valid or non valid username
     app.get("/check-username", async (req, res) => {
       const username = req.query.username;
-  
+
       const query = { username: username };
       const existingUser = await usersCollection.findOne(query);
-  
+
       if (existingUser) {
-          res.send({ success: false, message: "Username already exists!" });
+        res.send({ success: false, message: "Username already exists!" });
       } else {
-          res.send({ success: true, message: "You can take it!" });
+        res.send({ success: true, message: "You can take it!" });
       }
-  });  
+    });
 
     //Update question details
     app.put('/update-question/:id', async (req, res) => {
@@ -235,6 +251,19 @@ async function run() {
       const result = await answerCollection.find().toArray();
       res.send(result);
     })
+
+    //Get the Answers
+    // app.get("/questions", async (req, res) => {
+    //   try {
+    //     const skip = parseInt(req.query.skip) || 0;
+    //     const limit = parseInt(req.query.limit) || 10;
+    //     const result = await questionsCollection.find().sort({ _id: -1 }).skip(skip).limit(limit).toArray();
+    //     res.send(result);
+    //   } catch (error) {
+    //     console.error(error);
+    //     res.status(500).json({ error: "Server error" });
+    //   }
+    // });
 
     //Set the answer id in the questions
     app.patch('/question/:id', async (req, res) => {
@@ -282,17 +311,56 @@ async function run() {
       res.send(result);
     })
 
-    //Vote api
+    //Delete Answer
+    app.delete('/delete-answer/:id', async (req, res) => {
+      const id = req.params.id;
+      const query = { _id: new ObjectId(id) };
+      const result = await answerCollection.deleteOne(query)
+      res.send(result);
+    })
+
+    //Question Vote api (Like)
     app.post('/vote/:id', async (req, res) => {
       const queId = req.params.id;
       const user = req.body.email;
-      const filter = { _id: new ObjectId(queId) }
+      const filter = { _id: new ObjectId(queId) };
       const updateDoc = {
         $addToSet: { QuestionsVote: user }
       };
-      const updateResult = await questionsCollection.updateOne(filter, updateDoc);
-      res.send({ updateResult });
-    })
+
+      try {
+        const updateResult = await questionsCollection.updateOne(
+          { ...filter, QuestionsVote: { $ne: user } },
+          updateDoc
+        );
+        if (updateResult.matchedCount === 0) {
+          return res.status(400).send({ message: 'User has already voted or question not found.' });
+        }
+        res.send({ updateResult });
+      } catch (error) {
+        res.status(500).send({ message: 'Internal Server Error' });
+      }
+    });
+
+    // Question Vote API (Unlike)
+    app.delete('/vote/:id', async (req, res) => {
+      const queId = req.params.id;
+      const user = req.body.email;
+      const filter = { _id: new ObjectId(queId) };
+      const updateDoc = {
+        $pull: { QuestionsVote: user }
+      };
+
+      try {
+        const updateResult = await questionsCollection.updateOne(filter, updateDoc);
+        if (updateResult.matchedCount === 0) {
+          return res.status(400).send({ message: 'User had not voted or question not found.' });
+        }
+        res.send({ updateResult });
+      } catch (error) {
+        res.status(500).send({ message: 'Internal Server Error' });
+      }
+    });
 
     // Get all tag
     app.get("/tags", async (req, res) => {
@@ -329,13 +397,13 @@ async function run() {
     app.get("/search", async (req, res) => {
       try {
         const { query } = req.query;
-    
+
         if (!query) {
           return res.status(400).json({ error: "Type something" });
         }
-        
+
         const regex = new RegExp(query);
-    
+
         const results = await questionsCollection.find({
           $or: [
             { title: regex },
@@ -343,14 +411,14 @@ async function run() {
             { selected: { $elemMatch: { $regex: regex } } }
           ]
         }).toArray();
-    
+
         res.json(results);
       } catch (error) {
         console.error(error);
         res.status(500).json({ error: "Server error" });
       }
     });
-    
+
     //Save the questions
     app.post("/saves", async (req, res) => {
       const savesData = req.body;
