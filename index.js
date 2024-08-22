@@ -252,18 +252,44 @@ async function run() {
       res.send(result);
     })
 
-    //Get the Answers
-    // app.get("/questions", async (req, res) => {
+    //Get 10 Answers in every click
+    // app.get('/tenAnswers', async (req, res) => {
+    //   const { skip = 0, limit = 10 } = req.query;
     //   try {
-    //     const skip = parseInt(req.query.skip) || 0;
-    //     const limit = parseInt(req.query.limit) || 10;
-    //     const result = await questionsCollection.find().sort({ _id: -1 }).skip(skip).limit(limit).toArray();
-    //     res.send(result);
+    //     const answers = await AnswerModel.find({})
+    //       .skip(parseInt(skip))
+    //       .limit(parseInt(limit));
+    //     res.json(answers);
     //   } catch (error) {
-    //     console.error(error);
-    //     res.status(500).json({ error: "Server error" });
+    //     console.error('Error fetching answers:', error);
+    //     res.status(500).json({ error: 'Failed to fetch answers' });
     //   }
     // });
+
+    // Update an Answer
+    app.put("/answers/:id", async (req, res) => {
+      const id = req.params.id;
+      const updatedAnswer = req.body;
+
+      try {
+        const filter = { _id: new ObjectId(id) };
+        const updateDoc = {
+          $set: updatedAnswer,
+        };
+        const result = await answerCollection.updateOne(filter, updateDoc);
+        res.send(result);
+      } catch (error) {
+        res.status(500).send({ message: "Error updating answer.", error: error.message });
+      }
+    });
+
+    //Delete Answer
+    app.delete('/delete-answer/:id', async (req, res) => {
+      const id = req.params.id;
+      const query = { _id: new ObjectId(id) };
+      const result = await answerCollection.deleteOne(query)
+      res.send(result);
+    })
 
     //Set the answer id in the questions
     app.patch('/question/:id', async (req, res) => {
@@ -308,14 +334,6 @@ async function run() {
       const email = req.params.email;
       const query = { email: email }
       const result = await answerCollection.find(query).toArray();
-      res.send(result);
-    })
-
-    //Delete Answer
-    app.delete('/delete-answer/:id', async (req, res) => {
-      const id = req.params.id;
-      const query = { _id: new ObjectId(id) };
-      const result = await answerCollection.deleteOne(query)
       res.send(result);
     })
 
@@ -439,6 +457,39 @@ async function run() {
       const result = await saveCollection.find().toArray();
       res.send(result);
     })
+
+    // Top 5 selected Tag
+    app.get('/top-tags', async (req, res) => {
+      try {
+        const result = await questionsCollection.aggregate([
+          { $unwind: "$selected" },
+          { $group: { _id: "$selected", count: { $sum: 1 } } },
+          { $sort: { count: -1 } },
+          { $limit: 5 },
+          { $project: { _id: 0, tagName: "$_id", count: 1 } }
+        ]).toArray();
+
+        res.json(result);
+      } catch (error) {
+        res.status(500).send(error.message);
+      }
+    });
+
+    // Top 5 Hot Question
+    app.get('/hot-questions', async (req, res) => {
+      try {
+        const result = await questionsCollection.aggregate([
+          { $addFields: { likeCount: { $size: "$QuestionsVote" } } },
+          { $sort: { likeCount: -1 } },
+          { $limit: 5 },
+          { $project: { _id: 1, title: 1, likeCount: 1 } }
+        ]).toArray();
+
+        res.json(result);
+      } catch (error) {
+        res.status(500).send(error.message);
+      }
+    });
 
     // Send a ping to confirm a successful connection
     await client.db("admin").command({ ping: 1 });
