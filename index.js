@@ -179,6 +179,20 @@ async function run() {
       res.send(result)
     })
 
+    // Check valid or non valid username
+    app.get("/check-username", async (req, res) => {
+      const username = req.query.username;
+
+      const query = { username: username };
+      const existingUser = await usersCollection.findOne(query);
+
+      if (existingUser) {
+        res.send({ success: false, message: "Username already exists!" });
+      } else {
+        res.send({ success: true, message: "You can take it!" });
+      }
+    });
+
     // add a questions api
     app.post("/questions", async (req, res) => {
       const quesData = req.body;
@@ -196,20 +210,6 @@ async function run() {
       } catch (error) {
         console.error(error);
         res.status(500).json({ error: "Server error" });
-      }
-    });
-
-    // Check valid or non valid username
-    app.get("/check-username", async (req, res) => {
-      const username = req.query.username;
-
-      const query = { username: username };
-      const existingUser = await usersCollection.findOne(query);
-
-      if (existingUser) {
-        res.send({ success: false, message: "Username already exists!" });
-      } else {
-        res.send({ success: true, message: "You can take it!" });
       }
     });
 
@@ -248,23 +248,22 @@ async function run() {
 
     //Get Answers
     app.get("/answers", async (req, res) => {
-      const result = await answerCollection.find().toArray();
+      const result = await answerCollection.find().sort({ _id: -1 }).toArray();
       res.send(result);
     })
 
     //Get 10 Answers in every click
-    // app.get('/tenAnswers', async (req, res) => {
-    //   const { skip = 0, limit = 10 } = req.query;
-    //   try {
-    //     const answers = await AnswerModel.find({})
-    //       .skip(parseInt(skip))
-    //       .limit(parseInt(limit));
-    //     res.json(answers);
-    //   } catch (error) {
-    //     console.error('Error fetching answers:', error);
-    //     res.status(500).json({ error: 'Failed to fetch answers' });
-    //   }
-    // });
+    app.get("/tenAnswer", async (req, res) => {
+      try {
+        const skip = parseInt(req.query.skip) || 0;
+        const limit = parseInt(req.query.limit) || 10;
+        const result = await answerCollection.find().sort({ _id: -1 }).skip(skip).limit(limit).toArray();
+        res.send(result);
+      } catch (error) {
+        console.error(error);
+        res.status(500).json({ error: "Server error" });
+      }
+    });
 
     // Update an Answer
     app.put("/answers/:id", async (req, res) => {
@@ -377,6 +376,27 @@ async function run() {
         res.send({ updateResult });
       } catch (error) {
         res.status(500).send({ message: 'Internal Server Error' });
+      }
+    });
+
+    //Total Question View Count
+    app.patch("/questions/:id/increment-view", async (req, res) => {
+      const questionId = req.params.id;
+
+      try {
+        const result = await questionsCollection.updateOne(
+          { _id: new ObjectId(questionId) },
+          { $inc: { totalViews: 1 } }
+        );
+
+        if (result.modifiedCount === 1) {
+          res.status(200).json({ message: "View count incremented successfully" });
+        } else {
+          res.status(404).json({ error: "Question not found" });
+        }
+      } catch (error) {
+        console.error(error);
+        res.status(500).json({ error: "Server error" });
       }
     });
 
