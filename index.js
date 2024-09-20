@@ -56,8 +56,19 @@ async function run() {
 
     // Get all users
     app.get("/users", async (req, res) => {
-      const result = await usersCollection.find().sort({ _id: -1 }).toArray();
-      res.send(result);
+      const limit = parseInt(req.query.limit) || 18;
+      const skip = parseInt(req.query.skip) || 0;
+
+      const result = await usersCollection
+        .find()
+        .sort({ _id: -1 })
+        .skip(skip)
+        .limit(limit)
+        .toArray();
+
+      const total = await usersCollection.countDocuments();
+
+      res.send({ users: result, total });
     });
 
     //Post users data to database
@@ -138,7 +149,7 @@ async function run() {
     });
 
     //Get User With Username Query
-    app.get('/user', async (req, res) => {
+    app.get('/user-by-username', async (req, res) => {
       const username = req.query.username;
       const query = { username: username };
       try {
@@ -206,6 +217,28 @@ async function run() {
         const skip = parseInt(req.query.skip) || 0;
         const limit = parseInt(req.query.limit) || 10;
         const result = await questionsCollection.find().sort({ _id: -1 }).skip(skip).limit(limit).toArray();
+        res.send(result);
+      } catch (error) {
+        console.error(error);
+        res.status(500).json({ error: "Server error" });
+      }
+    });
+
+    // Get Questions by Tag
+    app.get("/questions-by-tag", async (req, res) => {
+      try {
+        const { tag } = req.query;
+        const trimmedTag = tag.trim();
+        const skip = parseInt(req.query.skip) || 0;
+        const limit = parseInt(req.query.limit) || 10;
+
+        const result = await questionsCollection
+          .find({ selected: { $regex: new RegExp(`^${trimmedTag}$`, "i") } })
+          .sort({ _id: -1 })
+          .skip(skip)
+          .limit(limit)
+          .toArray();
+
         res.send(result);
       } catch (error) {
         console.error(error);
@@ -313,12 +346,33 @@ async function run() {
     })
 
     //Email query for the get questions
-    app.get('/questions/:email', async (req, res) => {
+    app.get('/single-user-all-questions/:email', async (req, res) => {
       const email = req.params.email;
-      const query = { email: email }
+      const query = { email: email };
       const result = await questionsCollection.find(query).toArray();
       res.send(result);
-    })
+    });
+
+    app.get('/questions/:email', async (req, res) => {
+      try {
+        const email = req.params.email;
+        const limit = parseInt(req.query.limit) || 10;
+        const skip = parseInt(req.query.skip) || 0;
+
+        const query = { email: email };
+
+        const result = await questionsCollection.find(query).sort({ _id: -1 }).skip(skip).limit(limit).toArray();
+
+        if (result.length === 0) {
+          return res.status(404).send({ message: 'No questions found' });
+        }
+
+        res.status(200).send(result);
+      } catch (error) {
+        console.error(error);
+        res.status(500).send({ message: 'Server error' });
+      }
+    });
 
     //Delete Questions
     app.delete('/delete-question/:id', async (req, res) => {
@@ -407,13 +461,14 @@ async function run() {
         const selectedItemsCounts = {};
 
         questions.forEach((question) => {
-          if (question.selected && Array.isArray(question.selected)) {
+          if (Array.isArray(question.selected)) {
             question.selected.forEach((item) => {
-              const lowercaseItem = item.toLowerCase();
-              if (selectedItemsCounts[lowercaseItem]) {
-                selectedItemsCounts[lowercaseItem]++;
+              const normalizedItem = item.trim().toLowerCase();
+
+              if (selectedItemsCounts[normalizedItem]) {
+                selectedItemsCounts[normalizedItem]++;
               } else {
-                selectedItemsCounts[lowercaseItem] = 1;
+                selectedItemsCounts[normalizedItem] = 1;
               }
             });
           }
@@ -423,6 +478,8 @@ async function run() {
           name: key,
           count: selectedItemsCounts[key],
         }));
+
+        tagArray.sort((a, b) => b.count - a.count);
 
         res.json(tagArray);
       } catch (error) {
@@ -481,15 +538,28 @@ async function run() {
     // Top 5 selected Tag
     app.get('/top-tags', async (req, res) => {
       try {
-        const result = await questionsCollection.aggregate([
-          { $unwind: "$selected" },
-          { $group: { _id: "$selected", count: { $sum: 1 } } },
-          { $sort: { count: -1 } },
-          { $limit: 5 },
-          { $project: { _id: 0, tagName: "$_id", count: 1 } }
-        ]).toArray();
+        const questions = await questionsCollection.find().toArray();
+        const tags = [];
 
-        res.json(result);
+        questions.forEach(question => {
+          if (Array.isArray(question.selected)) {
+            question.selected.forEach(item => {
+              tags.push(item.trim().toLowerCase());
+            });
+          }
+        });
+
+        const tagCounts = tags.reduce((acc, tag) => {
+          acc[tag] = (acc[tag] || 0) + 1;
+          return acc;
+        }, {});
+
+        const sortedTags = Object.keys(tagCounts)
+          .map(tag => ({ tagName: tag, count: tagCounts[tag] }))
+          .sort((a, b) => b.count - a.count)
+          .slice(0, 5);
+
+        res.json(sortedTags);
       } catch (error) {
         res.status(500).send(error.message);
       }
@@ -499,7 +569,15 @@ async function run() {
     app.get('/hot-questions', async (req, res) => {
       try {
         const result = await questionsCollection.aggregate([
-          { $addFields: { likeCount: { $size: "$QuestionsVote" } } },
+          {
+            $addFields: {
+              likeCount: {
+                $size: {
+                  $ifNull: ["$QuestionsVote", []]
+                }
+              }
+            }
+          },
           { $sort: { likeCount: -1 } },
           { $limit: 5 },
           { $project: { _id: 1, title: 1, likeCount: 1 } }
@@ -507,7 +585,8 @@ async function run() {
 
         res.json(result);
       } catch (error) {
-        res.status(500).send(error.message);
+        console.error('Server error:', error);
+        res.status(500).json({ error: 'An error occurred while fetching hot questions.' });
       }
     });
 
