@@ -204,10 +204,31 @@ async function run() {
       }
     });
 
-    // add a questions api
+    // Post a questions data
     app.post("/questions", async (req, res) => {
       const quesData = req.body;
       const result = await questionsCollection.insertOne(quesData);
+
+      const email = quesData.email;
+      const userQuestions = await questionsCollection.find({ email }).toArray();
+      const questionCount = userQuestions.length;
+
+      let levelOne = false, levelTwo = false, levelTop = false;
+      if (questionCount >= 20) {
+        levelTop = true;
+        levelTwo = true;
+        levelOne = true;
+      } else if (questionCount >= 10) {
+        levelTwo = true;
+        levelOne = true;
+      } else if (questionCount >= 5) {
+        levelOne = true;
+      }
+
+      await usersCollection.updateOne({ email }, {
+        $set: { levelOne, levelTwo, levelTop }
+      });
+
       res.send(result);
     });
 
@@ -348,11 +369,57 @@ async function run() {
     //Email query for the get questions
     app.get('/single-user-all-questions/:email', async (req, res) => {
       const email = req.params.email;
-      const query = { email: email };
-      const result = await questionsCollection.find(query).toArray();
-      res.send(result);
-    });
+    
+      try {
+        const user = await usersCollection.findOne({ email });
+        const query = { email };
+        const userQuestions = await questionsCollection.find(query).toArray();
+        const questionCount = userQuestions.length;
+    
+        let levelOne = false, levelTwo = false, levelTop = false;
+    
+        if (!user.manualLevelUpdate) {
+          if (questionCount >= 20) {
+            levelTop = true;
+            levelTwo = true;
+            levelOne = true;
+          } else if (questionCount >= 10) {
+            levelTwo = true;
+            levelOne = true;
+          } else if (questionCount >= 5) {
+            levelOne = true;
+          }
+    
+          await usersCollection.updateOne({ email }, {
+            $set: { levelOne, levelTwo, levelTop }
+          });
+        }
+    
+        res.send({ questions: userQuestions, levelOne: user.levelOne, levelTwo: user.levelTwo, levelTop: user.levelTop });
+      } catch (error) {
+        console.error(error);
+        res.status(500).json({ error: "Server error" });
+      }
+    });    
 
+    // Update Level Only
+    app.put('/update-level/:email', async (req, res) => {
+      const { email } = req.params;
+      const { levelOne, levelTwo, levelTop } = req.body;
+    
+      const result = await usersCollection.updateOne(
+        { email },
+        { $set: { levelOne, levelTwo, levelTop, manualLevelUpdate: true } }
+      );
+    
+      if (result.matchedCount > 0) {
+        res.send({ message: 'User levels updated successfully' });
+      } else {
+        res.status(500).send({ message: 'Failed to update user levels' });
+      }
+    });      
+
+    // Ten Question Get With Specific user
     app.get('/questions/:email', async (req, res) => {
       try {
         const email = req.params.email;
@@ -377,10 +444,37 @@ async function run() {
     //Delete Questions
     app.delete('/delete-question/:id', async (req, res) => {
       const id = req.params.id;
-      const query = { _id: new ObjectId(id) };
-      const result = await questionsCollection.deleteOne(query)
+
+      const question = await questionsCollection.findOne({ _id: new ObjectId(id) });
+      if (!question) {
+        return res.status(404).send({ message: "Question not found" });
+      }
+
+      const email = question.email;
+
+      const result = await questionsCollection.deleteOne({ _id: new ObjectId(id) });
+
+      const userQuestions = await questionsCollection.find({ email }).toArray();
+      const questionCount = userQuestions.length;
+
+      let levelOne = false, levelTwo = false, levelTop = false;
+      if (questionCount >= 20) {
+        levelTop = true;
+        levelTwo = true;
+        levelOne = true;
+      } else if (questionCount >= 10) {
+        levelTwo = true;
+        levelOne = true;
+      } else if (questionCount >= 5) {
+        levelOne = true;
+      }
+
+      await usersCollection.updateOne({ email }, {
+        $set: { levelOne, levelTwo, levelTop }
+      });
+
       res.send(result);
-    })
+    });
 
     //Email query for the get Answers
     app.get('/answers/:email', async (req, res) => {
