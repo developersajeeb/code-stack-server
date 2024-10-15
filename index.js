@@ -369,15 +369,15 @@ async function run() {
     //Email query for the get questions
     app.get('/single-user-all-questions/:email', async (req, res) => {
       const email = req.params.email;
-    
+
       try {
         const user = await usersCollection.findOne({ email });
         const query = { email };
         const userQuestions = await questionsCollection.find(query).toArray();
         const questionCount = userQuestions.length;
-    
+
         let levelOne = false, levelTwo = false, levelTop = false;
-    
+
         if (!user.manualLevelUpdate) {
           if (questionCount >= 20) {
             levelTop = true;
@@ -389,35 +389,35 @@ async function run() {
           } else if (questionCount >= 5) {
             levelOne = true;
           }
-    
+
           await usersCollection.updateOne({ email }, {
             $set: { levelOne, levelTwo, levelTop }
           });
         }
-    
+
         res.send({ questions: userQuestions, levelOne: user.levelOne, levelTwo: user.levelTwo, levelTop: user.levelTop });
       } catch (error) {
         console.error(error);
         res.status(500).json({ error: "Server error" });
       }
-    });    
+    });
 
     // Update Level Only
     app.put('/update-level/:email', async (req, res) => {
       const { email } = req.params;
       const { levelOne, levelTwo, levelTop } = req.body;
-    
+
       const result = await usersCollection.updateOne(
         { email },
         { $set: { levelOne, levelTwo, levelTop, manualLevelUpdate: true } }
       );
-    
+
       if (result.matchedCount > 0) {
         res.send({ message: 'User levels updated successfully' });
       } else {
         res.status(500).send({ message: 'Failed to update user levels' });
       }
-    });      
+    });
 
     // Ten Question Get With Specific user
     app.get('/questions/:email', async (req, res) => {
@@ -477,11 +477,25 @@ async function run() {
     });
 
     //Email query for the get Answers
-    app.get('/answers/:email', async (req, res) => {
+    app.get('/single-user-answers/:email', async (req, res) => {
       const email = req.params.email;
       const query = { email: email }
       const result = await answerCollection.find(query).toArray();
       res.send(result);
+    })
+
+    //Email query for the get 10 Answers
+    app.get("/answers/:email", async (req, res) => {
+      try {
+        const email = req.params.email;
+        const skip = parseInt(req.query.skip) || 0;
+        const limit = parseInt(req.query.limit) || 10;
+        const result = await answerCollection.find({ email: email }).sort({ _id: -1 }).skip(skip).limit(limit).toArray();
+        res.send(result);
+      } catch (error) {
+        console.error(error);
+        res.status(500).json({ error: "Server error" });
+      }
     })
 
     //Question Vote api (Like)
@@ -611,17 +625,69 @@ async function run() {
     //Save the questions
     app.post("/saves", async (req, res) => {
       const savesData = req.body;
-      const result = await saveCollection.insertOne(savesData);
-      res.send(result);
+      const { questionID, userEmail } = savesData;
+
+      const existingSave = await saveCollection.findOne({ questionID, userEmail });
+
+      if (existingSave) {
+        const result = await saveCollection.deleteOne({ questionID, userEmail });
+        res.send({ message: "Question unsaved!", action: "unsaved", result });
+      } else {
+        const result = await saveCollection.insertOne(savesData);
+        res.send({ message: "Saved this question!", action: "saved", result });
+      }
     });
 
-    //Get Save data with email query
-    app.get('/save/:email', async (req, res) => {
-      const email = req.params.email;
-      const query = { userEmail: email }
-      const result = await saveCollection.find(query).toArray();
-      res.send(result);
-    })
+    //Get Save data with email query (Every Click 10 Data Given)
+    // app.get('/save/:email', async (req, res) => {
+    //   const email = req.params.email;
+    //   const query = { userEmail: email }
+    //   const result = await saveCollection.find(query).toArray();
+    //   res.send(result);
+    // })
+
+    //Get Save data with email query (Every Click 10 Data Given)
+    app.get('/single-user-saves/:email', async (req, res) => {
+      try {
+        const email = req.params.email;
+        const limit = parseInt(req.query.limit) || 10;
+        const skip = parseInt(req.query.skip) || 0;
+
+        const query = { userEmail: email }
+
+        const result = await saveCollection.find(query).sort({ _id: -1 }).skip(skip).limit(limit).toArray();
+
+        if (result.length === 0) {
+          return res.status(404).send({ message: 'No saved questions found!' });
+        }
+
+        res.status(200).send(result);
+      } catch (error) {
+        console.error(error);
+        res.status(500).send({ message: 'Server error' });
+      }
+    });
+
+    app.get('/check-saved/:questionID/:email', async (req, res) => {
+      const { questionID, email } = req.params;
+
+      try {
+        const isSaved = await saveCollection.findOne({
+          questionID: questionID,
+          userEmail: email
+        });
+
+        if (isSaved) {
+          return res.json({ isSaved: true });
+        } else {
+          return res.json({ isSaved: false });
+        }
+
+      } catch (error) {
+        console.error("Error checking saved status:", error);
+        res.status(500).json({ error: 'An error occurred' });
+      }
+    });
 
     //Get All Saves Data
     app.get("/saves", async (req, res) => {
