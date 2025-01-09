@@ -605,13 +605,12 @@ async function run() {
           return res.status(400).json({ error: "Type something" });
         }
 
-        const regex = new RegExp(query);
+        const regex = new RegExp(query, "i");
 
         const results = await questionsCollection.find({
           $or: [
             { title: regex },
-            { body: regex },
-            { selected: { $elemMatch: { $regex: regex } } }
+            { selected: { $elemMatch: { $regex: regex, $options: "i" } } }
           ]
         }).toArray();
 
