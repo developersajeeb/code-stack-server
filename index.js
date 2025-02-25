@@ -208,27 +208,6 @@ async function run() {
     app.post("/questions", async (req, res) => {
       const quesData = req.body;
       const result = await questionsCollection.insertOne(quesData);
-
-      const email = quesData.email;
-      const userQuestions = await questionsCollection.find({ email }).toArray();
-      const questionCount = userQuestions.length;
-
-      let levelOne = false, levelTwo = false, levelTop = false;
-      if (questionCount >= 20) {
-        levelTop = true;
-        levelTwo = true;
-        levelOne = true;
-      } else if (questionCount >= 10) {
-        levelTwo = true;
-        levelOne = true;
-      } else if (questionCount >= 5) {
-        levelOne = true;
-      }
-
-      await usersCollection.updateOne({ email }, {
-        $set: { levelOne, levelTwo, levelTop }
-      });
-
       res.send(result);
     });
 
@@ -372,30 +351,36 @@ async function run() {
 
       try {
         const user = await usersCollection.findOne({ email });
-        const query = { email };
-        const userQuestions = await questionsCollection.find(query).toArray();
+        const userQuestions = await questionsCollection.find({ email }).toArray();
         const questionCount = userQuestions.length;
 
-        let levelOne = false, levelTwo = false, levelTop = false;
+        let milestoneReached = false;
 
-        if (!user.manualLevelUpdate) {
-          if (questionCount >= 20) {
-            levelTop = true;
-            levelTwo = true;
-            levelOne = true;
-          } else if (questionCount >= 10) {
-            levelTwo = true;
-            levelOne = true;
-          } else if (questionCount >= 5) {
-            levelOne = true;
-          }
+        // ✅ Milestone check for exact 5, 10, or 20 questions
+        if ([5, 10, 20].includes(questionCount) && !user.manualLevelUpdate) {
+          milestoneReached = true;
 
-          await usersCollection.updateOne({ email }, {
-            $set: { levelOne, levelTwo, levelTop }
-          });
+          // Set manualLevelUpdate true only for milestone
+          await usersCollection.updateOne(
+            { email },
+            { $set: { manualLevelUpdate: true } }
+          );
         }
 
-        res.send({ questions: userQuestions, levelOne: user.levelOne, levelTwo: user.levelTwo, levelTop: user.levelTop });
+        // ✅ If question count is NOT milestone, reset manualLevelUpdate to false
+        if (questionCount !== 5 && questionCount !== 10 && questionCount !== 20 && user.manualLevelUpdate) {
+          await usersCollection.updateOne(
+            { email },
+            { $set: { manualLevelUpdate: false } }
+          );
+        }
+
+        res.send({
+          questions: userQuestions,
+          questionCount,
+          manualLevelUpdate: milestoneReached || user.manualLevelUpdate
+        });
+
       } catch (error) {
         console.error(error);
         res.status(500).json({ error: "Server error" });
@@ -404,18 +389,18 @@ async function run() {
 
     // Update Level Only
     app.put('/update-level/:email', async (req, res) => {
-      const { email } = req.params;
-      const { levelOne, levelTwo, levelTop } = req.body;
+      const email = req.params.email;
 
-      const result = await usersCollection.updateOne(
-        { email },
-        { $set: { levelOne, levelTwo, levelTop, manualLevelUpdate: true } }
-      );
+      try {
+        await usersCollection.updateOne(
+          { email },
+          { $set: { manualLevelUpdate: false } } // Reset on "Mark as read"
+        );
+        res.json({ message: "Milestone marked as read." });
 
-      if (result.matchedCount > 0) {
-        res.send({ message: 'User levels updated successfully' });
-      } else {
-        res.status(500).send({ message: 'Failed to update user levels' });
+      } catch (error) {
+        console.error(error);
+        res.status(500).json({ error: "Failed to update manualLevelUpdate." });
       }
     });
 
@@ -450,29 +435,7 @@ async function run() {
         return res.status(404).send({ message: "Question not found" });
       }
 
-      const email = question.email;
-
       const result = await questionsCollection.deleteOne({ _id: new ObjectId(id) });
-
-      const userQuestions = await questionsCollection.find({ email }).toArray();
-      const questionCount = userQuestions.length;
-
-      let levelOne = false, levelTwo = false, levelTop = false;
-      if (questionCount >= 20) {
-        levelTop = true;
-        levelTwo = true;
-        levelOne = true;
-      } else if (questionCount >= 10) {
-        levelTwo = true;
-        levelOne = true;
-      } else if (questionCount >= 5) {
-        levelOne = true;
-      }
-
-      await usersCollection.updateOne({ email }, {
-        $set: { levelOne, levelTwo, levelTop }
-      });
-
       res.send(result);
     });
 
