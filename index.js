@@ -356,18 +356,15 @@ async function run() {
 
         let milestoneReached = false;
 
-        // ✅ Milestone check for exact 5, 10, or 20 questions
         if ([5, 10, 20].includes(questionCount) && !user.manualLevelUpdate) {
           milestoneReached = true;
 
-          // Set manualLevelUpdate true only for milestone
           await usersCollection.updateOne(
             { email },
             { $set: { manualLevelUpdate: true } }
           );
         }
 
-        // ✅ If question count is NOT milestone, reset manualLevelUpdate to false
         if (questionCount !== 5 && questionCount !== 10 && questionCount !== 20 && user.manualLevelUpdate) {
           await usersCollection.updateOne(
             { email },
@@ -387,14 +384,14 @@ async function run() {
       }
     });
 
-    // Update Level Only
+    // Update Level
     app.put('/update-level/:email', async (req, res) => {
       const email = req.params.email;
 
       try {
         await usersCollection.updateOne(
           { email },
-          { $set: { manualLevelUpdate: false } } // Reset on "Mark as read"
+          { $set: { manualLevelUpdate: false } }
         );
         res.json({ message: "Milestone marked as read." });
 
